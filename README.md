@@ -13,6 +13,7 @@ This is Unity3d bindings for the [whisper.cpp](https://github.com/ggerganov/whis
 - Different models sizes offering speed and accuracy tradeoffs
 - Runs on local users device without Internet connection
 - Free and open source, can be used in commercial projects
+- **Voice Activity Detection (VAD)**: Choose between Simple VAD (energy-based) or Silero VAD (neural network-based) for more accurate speech detection
 
 **Supported platforms:**
 - [x] Windows (x86_64, [optional Vulkan](#gpu-acceleration))
@@ -79,6 +80,34 @@ sh build_cpp_linux.sh path/to/whisper
 7. If build was successful compiled libraries should be automatically update package `Plugins` folder. 
  
 Windows will produce only Windows library, Linux will produce only Linux. MacOS will produce MacOS, iOS and Android libraries.
+
+## Voice Activity Detection (VAD)
+
+Whisper Unity includes two VAD (Voice Activity Detection) algorithms to automatically detect when someone is speaking:
+
+### Simple VAD (Default)
+- **Energy-based detection** using audio amplitude analysis
+- **No additional dependencies** required
+- **Fast and lightweight** processing
+- **Good for basic use cases** where simplicity is preferred
+
+### Silero VAD (Advanced)
+- **Neural network-based detection** using deep learning models
+- **More accurate speech detection** compared to energy-based methods
+- **Requires ONNX Runtime** and Silero VAD model file
+- **Better performance** in noisy environments
+
+### Setup Silero VAD
+1. Install Microsoft.ML.OnnxRuntime package in your Unity project
+2. Add `ONNX_RUNTIME_AVAILABLE` to scripting define symbols
+3. Download the Silero VAD model from: https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx
+4. Place the model in your `StreamingAssets` folder as `silero_vad.onnx`
+5. In `MicrophoneRecord` component, set "Vad Type" to "Silero"
+
+For detailed setup instructions, see the [Silero VAD documentation](Packages/com.whisper.unity/Documentation~/SileroVAD.md).
+
+### Automatic Fallback
+If Silero VAD fails to initialize (missing ONNX Runtime or model file), the system automatically falls back to Simple VAD without errors.
 
 ## License
 This project is licensed under the MIT License. 
