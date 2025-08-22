@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using JetBrains.Annotations;
 using UnityEngine;
@@ -49,10 +50,25 @@ namespace Whisper.Utils
         public float vadContextSec = 30f;
         [Tooltip("Window size where VAD tries to detect speech")]
         public float vadLastSec = 1.25f;
+        
+        [Header("VAD Algorithm Selection")]
+        [Tooltip("Type of VAD algorithm to use")]
+        public VadType vadType = VadType.Simple;
+        
+        [Header("Simple VAD Settings")]
         [Tooltip("Threshold of VAD energy activation")]
         public float vadThd = 1.0f;
         [Tooltip("Threshold of VAD filter frequency")]
         public float vadFreqThd = 100.0f;
+        
+        [Header("Silero VAD Settings")]
+        [Tooltip("Path to Silero VAD ONNX model file (relative to StreamingAssets or absolute path)")]
+        public string sileroModelPath = "silero_vad.onnx";
+        [Tooltip("Silero VAD detection threshold (0.0 to 1.0, typically 0.5)")]
+        [Range(0.0f, 1.0f)]
+        public float sileroThreshold = 0.5f;
+        
+        [Header("VAD Visual Feedback")]
         [Tooltip("Optional indicator that changes color when speech detected")]
         [CanBeNull] public Image vadIndicatorImage;
         
@@ -94,6 +110,7 @@ namespace Whisper.Utils
         private bool _madeLoopLap;
 
         private string _selectedMicDevice;
+        private VadManager _vadManager;
 
         public string SelectedMicDevice
         {
@@ -210,7 +227,25 @@ namespace Whisper.Utils
             
             // try to get sample for voice detection
             var data = GetMicBufferLast(micPos, vadContextSec);
-            var vad = AudioUtils.SimpleVad(data, _clip.frequency, vadLastSec, vadThd, vadFreqThd);
+            
+            // Initialize VAD manager if needed
+            if (_vadManager == null)
+            {
+                InitializeVadManager();
+            }
+            
+            // Perform voice activity detection
+            bool vad;
+            if (_vadManager != null && _vadManager.IsInitialized)
+            {
+                vad = _vadManager.DetectVoiceActivity(data, _clip.frequency, vadLastSec);
+            }
+            else
+            {
+                // Fallback to simple VAD if manager initialization failed
+                LogUtils.Warning("VAD Manager not initialized, falling back to Simple VAD");
+                vad = AudioUtils.SimpleVad(data, _clip.frequency, vadLastSec, vadThd, vadFreqThd);
+            }
 
             // raise event if vad has changed
             if (vad != IsVoiceDetected)
@@ -250,6 +285,44 @@ namespace Whisper.Utils
             SelectedMicDevice = opt.text == microphoneDefaultLabel ? null : opt.text;
         }
 
+        private void InitializeVadManager()
+        {
+            try
+            {
+                // Resolve Silero model path
+                var modelPath = sileroModelPath;
+                if (vadType == VadType.Silero && !string.IsNullOrEmpty(modelPath))
+                {
+                    // Try StreamingAssets folder first
+                    var streamingAssetsPath = Path.Combine(Application.streamingAssetsPath, modelPath);
+                    if (File.Exists(streamingAssetsPath))
+                    {
+                        modelPath = streamingAssetsPath;
+                    }
+                    else if (!Path.IsPathRooted(modelPath))
+                    {
+                        // If relative path, make it absolute from the project root
+                        modelPath = Path.Combine(Application.dataPath, "..", modelPath);
+                    }
+                }
+
+                _vadManager = new VadManager(
+                    vadType,
+                    vadThd,
+                    vadFreqThd,
+                    modelPath,
+                    sileroThreshold
+                );
+
+                LogUtils.Log($"VAD Manager initialized with {vadType} VAD");
+            }
+            catch (Exception e)
+            {
+                LogUtils.Error($"Failed to initialize VAD Manager: {e.Message}");
+                _vadManager = null;
+            }
+        }
+
         /// <summary>
         /// Start microphone recording
         /// </summary>
@@ -268,6 +341,9 @@ namespace Whisper.Utils
             _lastVadPos = 0;
             _vadStopBegin = null;
             _chunksLength = (int) (_clip.frequency * _clip.channels * chunksLengthSec);
+            
+            // Reset VAD state when starting new recording
+            _vadManager?.ResetState();
         }
 
         /// <summary>
@@ -385,6 +461,11 @@ namespace Whisper.Utils
 
             // circular buffer case
             return ClipSamples - prevPos + newPos;
+        }
+
+        private void OnDestroy()
+        {
+            _vadManager?.Dispose();
         }
     }
 }
